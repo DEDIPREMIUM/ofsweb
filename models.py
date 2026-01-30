@@ -22,3 +22,7 @@ class VPNAccount(db.Model):
     protocol = db.Column(db.String(10)) # ws, tls, tcp
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expiry = db.Column(db.DateTime)
+
+class SystemConfig(db.Model):
+    key = db.Column(db.String(50), primary_key=True)
+    value = db.Column(db.String(200))

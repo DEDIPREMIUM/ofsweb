@@ -223,6 +223,9 @@
         <div class="nav-item" onclick="showSection('ss', this)">
             <i class="fas fa-ghost"></i> SHADOWSOCKS
         </div>
+        <div class="nav-item" onclick="showSection('settings', this)">
+            <i class="fas fa-cog"></i> Settings
+        </div>
         <div class="nav-item" onclick="updateSystem()">
             <i class="fas fa-sync-alt"></i> Update
         </div>
@@ -320,6 +323,17 @@
             <div class="card"><h3>Active SS Accounts</h3><div id="ss-list">Loading...</div></div>
         </div>
 
+        <div id="settings" class="section">
+            <div class="card">
+                <h2>Domain Settings</h2>
+                <div class="form-group">
+                    <label>Current Domain</label>
+                    <input type="text" class="form-control" id="domain-val">
+                </div>
+                <button class="btn" onclick="updateDomain()">Save Domain</button>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -401,17 +415,57 @@
                     return;
                 }
 
-                let html = '<table><thead><tr><th>Username</th><th>Details</th><th>Action</th></tr></thead><tbody>';
+                let html = '<table><thead><tr><th>Username</th><th>Details</th><th>Links</th><th>Action</th></tr></thead><tbody>';
                 data.accounts.forEach(acc => {
+                    let linkButtons = '';
+                    if(acc.links && acc.links.tls) {
+                        linkButtons += `<button class="btn" style="padding:5px 10px; margin-right:5px; font-size:0.8rem;" onclick="copyToClipboard('${acc.links.tls}')">Copy TLS</button>`;
+                    }
+                    if(acc.links && acc.links.nontls) {
+                        linkButtons += `<button class="btn" style="padding:5px 10px; margin-right:5px; font-size:0.8rem; background:#4b76a2;" onclick="copyToClipboard('${acc.links.nontls}')">Copy NTLS</button>`;
+                    }
+                    if(!linkButtons) linkButtons = '-';
+
                     html += `<tr>
                         <td>${acc.username}</td>
                         <td>${acc.details}</td>
+                        <td>${linkButtons}</td>
                         <td><button class="btn btn-danger" onclick="deleteAccount(${acc.id}, '${type}')">Delete</button></td>
                     </tr>`;
                 });
                 html += '</tbody></table>';
                 container.innerHTML = html;
             } catch(e) { container.innerHTML = 'Error loading accounts'; }
+        }
+
+        async function loadDomain() {
+            try {
+                const res = await fetch('/api/domain');
+                const data = await res.json();
+                document.getElementById('domain-val').value = data.domain;
+            } catch(e) { console.error(e); }
+        }
+
+        async function updateDomain() {
+            const domain = document.getElementById('domain-val').value;
+            try {
+                const res = await fetch('/api/domain', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domain})
+                });
+                const data = await res.json();
+                if(data.success) showToast('Domain updated', 'success');
+                else showToast(data.message, 'error');
+            } catch(e) { showToast('Error updating domain', 'error'); }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Link copied to clipboard', 'success');
+            }).catch(err => {
+                showToast('Failed to copy', 'error');
+            });
         }
 
         async function deleteAccount(id, type) {
@@ -431,6 +485,7 @@
         // Init
         setInterval(updateStats, 5000);
         updateStats();
+        loadDomain();
 
     </script>
 </body>

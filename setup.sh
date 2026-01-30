@@ -13,4 +13,15 @@ fi
 # Install Python dependencies
 pip3 install -r requirements.txt
 
-echo "Setup complete. You can run the application with: python3 app.py"
+# Prompt for Domain
+read -p "Masukkan Domain VPS Anda (contoh: vpn.example.com): " domain_input
+
+if [ -z "$domain_input" ]; then
+    echo "Domain tidak boleh kosong. Menggunakan default: localhost"
+    domain_input="localhost"
+fi
+
+python3 init_domain.py "$domain_input"
+
+echo "Setup complete. Domain configured to $domain_input."
+echo "You can run the application with: python3 app.py"

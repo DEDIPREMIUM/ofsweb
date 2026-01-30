@@ -1,11 +1,13 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
-from models import db, User, VPNAccount
+from models import db, User, VPNAccount, SystemConfig
 import bcrypt
 import os
 import psutil
 import subprocess
 import uuid
+import json
+import base64
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'diana-vpn-secret-key-change-me')
@@ -87,6 +89,28 @@ def get_stats():
     active_accounts = VPNAccount.query.filter_by(user_id=current_user.id).count()
     return jsonify({'cpu': cpu, 'ram': ram, 'active_accounts': active_accounts})
 
+@app.route('/api/domain', methods=['GET', 'POST'])
+@login_required
+def manage_domain():
+    if request.method == 'POST':
+        data = request.json
+        new_domain = data.get('domain')
+        if not new_domain:
+            return jsonify({'success': False, 'message': 'Domain cannot be empty'}), 400
+
+        config = SystemConfig.query.get('domain')
+        if not config:
+            config = SystemConfig(key='domain', value=new_domain)
+            db.session.add(config)
+        else:
+            config.value = new_domain
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Domain updated successfully'})
+
+    config = SystemConfig.query.get('domain')
+    domain = config.value if config else 'localhost'
+    return jsonify({'domain': domain})
+
 @app.route('/update', methods=['POST'])
 @login_required
 def update_system():
@@ -142,18 +166,55 @@ def list_accounts():
     acc_type = request.args.get('type')
     accounts = VPNAccount.query.filter_by(user_id=current_user.id, account_type=acc_type).all()
 
+    # Get Current Domain
+    sys_config = SystemConfig.query.get('domain')
+    system_domain = sys_config.value if sys_config else 'localhost'
+
     acc_list = []
     for acc in accounts:
         details = ""
+        links = {}
+
         if acc.account_type in ['ssh', 'ss']:
             details = f"Pass: {acc.password}, Port: {acc.port}"
         else:
-            details = f"UUID: {acc.uuid}, Port: {acc.port}, Domain: {acc.domain}"
+            # Use stored domain if account domain is default/placeholder, otherwise use account specific if implemented
+            domain = system_domain
+
+            # --- Link Generation ---
+            if acc.account_type == 'vless':
+                # TLS
+                links['tls'] = f"vless://{acc.uuid}@{domain}:443?security=tls&encryption=none&headerType=none&type=ws&host={domain}&sni={domain}#{acc.username}"
+                # Non-TLS
+                links['nontls'] = f"vless://{acc.uuid}@{domain}:80?security=none&encryption=none&headerType=none&type=ws&host={domain}#{acc.username}"
+                details = f"UUID: {acc.uuid}"
+
+            elif acc.account_type == 'vmess':
+                # TLS
+                vmess_tls = {
+                    "v": "2", "ps": acc.username, "add": domain, "port": "443", "id": acc.uuid,
+                    "aid": "0", "net": "ws", "type": "none", "host": domain, "path": "/", "tls": "tls"
+                }
+                # Non-TLS
+                vmess_nontls = {
+                    "v": "2", "ps": acc.username, "add": domain, "port": "80", "id": acc.uuid,
+                    "aid": "0", "net": "ws", "type": "none", "host": domain, "path": "/", "tls": "none"
+                }
+                links['tls'] = "vmess://" + base64.b64encode(json.dumps(vmess_tls).encode('utf-8')).decode('utf-8')
+                links['nontls'] = "vmess://" + base64.b64encode(json.dumps(vmess_nontls).encode('utf-8')).decode('utf-8')
+                details = f"UUID: {acc.uuid}"
+
+            elif acc.account_type == 'trojan':
+                links['tls'] = f"trojan://{acc.uuid}@{domain}:443?security=tls&headerType=none&type=ws&host={domain}&sni={domain}#{acc.username}"
+                # Trojan typically implies TLS, but for consistency in structure:
+                links['nontls'] = f"trojan://{acc.uuid}@{domain}:80?security=none&headerType=none&type=ws&host={domain}#{acc.username}"
+                details = f"Password/UUID: {acc.uuid}"
 
         acc_list.append({
             'id': acc.id,
             'username': acc.username,
-            'details': details
+            'details': details,
+            'links': links
         })
 
     return jsonify({'accounts': acc_list})
