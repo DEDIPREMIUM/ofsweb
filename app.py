@@ -43,6 +43,9 @@ def login():
     user = User.query.filter_by(email=email).first()
 
     if user and bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
+        if not user.is_approved:
+            return jsonify({'success': False, 'message': 'Account pending approval'}), 401
+
         login_user(user)
         return jsonify({'success': True, 'message': 'Login successful'})
 
@@ -62,11 +65,13 @@ def register():
         return jsonify({'success': False, 'message': 'Email already exists'}), 400
 
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    new_user = User(name=name, email=email, password=hashed_password)
+    # First user ever registered could be auto-approved/admin, but we handle that in init script.
+    # Default: Not approved, Not admin
+    new_user = User(name=name, email=email, password=hashed_password, is_approved=False, is_admin=False)
     db.session.add(new_user)
     db.session.commit()
 
-    return jsonify({'success': True, 'message': 'Registration successful'})
+    return jsonify({'success': True, 'message': 'Registration successful. Please wait for admin approval.'})
 
 @app.route('/logout')
 @login_required
@@ -77,9 +82,57 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html', name=current_user.name)
+    return render_template('dashboard.html', name=current_user.name, is_admin=current_user.is_admin)
 
 # --- API Endpoints ---
+
+@app.route('/api/admin/users')
+@login_required
+def list_users():
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+
+    users = User.query.all()
+    user_list = []
+    for u in users:
+        user_list.append({
+            'id': u.id,
+            'name': u.name,
+            'email': u.email,
+            'is_approved': u.is_approved,
+            'is_admin': u.is_admin
+        })
+    return jsonify({'users': user_list})
+
+@app.route('/api/admin/approve/<int:id>', methods=['POST'])
+@login_required
+def approve_user(id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+
+    user = User.query.get(id)
+    if user:
+        user.is_approved = True
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'User approved'})
+    return jsonify({'success': False, 'message': 'User not found'}), 404
+
+@app.route('/api/admin/reject/<int:id>', methods=['POST'])
+@login_required
+def reject_user(id):
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+
+    user = User.query.get(id)
+    if user:
+        # Prevent deleting yourself
+        if user.id == current_user.id:
+             return jsonify({'success': False, 'message': 'Cannot delete yourself'}), 400
+
+        db.session.delete(user)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'User rejected/deleted'})
+    return jsonify({'success': False, 'message': 'User not found'}), 404
 
 @app.route('/api/stats')
 @login_required

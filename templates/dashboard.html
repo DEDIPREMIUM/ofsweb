@@ -226,6 +226,11 @@
         <div class="nav-item" onclick="showSection('settings', this)">
             <i class="fas fa-cog"></i> Settings
         </div>
+        {% if is_admin %}
+        <div class="nav-item" onclick="showSection('users', this)">
+            <i class="fas fa-users"></i> Users
+        </div>
+        {% endif %}
         <div class="nav-item" onclick="updateSystem()">
             <i class="fas fa-sync-alt"></i> Update
         </div>
@@ -334,9 +339,28 @@
             </div>
         </div>
 
+        {% if is_admin %}
+        <div id="users" class="section">
+            <div class="card">
+                <h2>User Management</h2>
+                <div id="user-list">Loading...</div>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
 
     <script>
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
         function showSection(id, element) {
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
             document.getElementById(id).classList.add('active');
@@ -346,7 +370,9 @@
                 element.classList.add('active');
             }
 
-            if(id !== 'dashboard') {
+            if(id === 'users') {
+                {% if is_admin %} loadUsers(); {% endif %}
+            } else if(id !== 'dashboard' && id !== 'settings') {
                 loadAccounts(id);
             }
         }
@@ -427,8 +453,8 @@
                     if(!linkButtons) linkButtons = '-';
 
                     html += `<tr>
-                        <td>${acc.username}</td>
-                        <td>${acc.details}</td>
+                        <td>${escapeHtml(acc.username)}</td>
+                        <td>${escapeHtml(acc.details)}</td>
                         <td>${linkButtons}</td>
                         <td><button class="btn btn-danger" onclick="deleteAccount(${acc.id}, '${type}')">Delete</button></td>
                     </tr>`;
@@ -459,6 +485,57 @@
                 else showToast(data.message, 'error');
             } catch(e) { showToast('Error updating domain', 'error'); }
         }
+
+        {% if is_admin %}
+        async function loadUsers() {
+            const container = document.getElementById('user-list');
+            container.innerHTML = 'Loading...';
+            try {
+                const res = await fetch('/api/admin/users');
+                const data = await res.json();
+
+                let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+                data.users.forEach(u => {
+                    let status = u.is_approved ? '<span style="color:#00d26a">Approved</span>' : '<span style="color:#ff4b4b">Pending</span>';
+                    let action = '';
+                    if(!u.is_approved) {
+                        action += `<button class="btn" style="padding:5px 10px; margin-right:5px;" onclick="approveUser(${u.id})">Approve</button>`;
+                    }
+                    if(!u.is_admin) { // Can't delete admin easily to prevent lockout
+                         action += `<button class="btn btn-danger" style="padding:5px 10px;" onclick="rejectUser(${u.id})">Delete</button>`;
+                    }
+
+                    html += `<tr>
+                        <td>${escapeHtml(u.name)} ${u.is_admin ? '(Admin)' : ''}</td>
+                        <td>${escapeHtml(u.email)}</td>
+                        <td>${status}</td>
+                        <td>${action}</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch(e) { container.innerHTML = 'Error loading users'; }
+        }
+
+        async function approveUser(id) {
+             try {
+                const res = await fetch('/api/admin/approve/' + id, {method: 'POST'});
+                const data = await res.json();
+                if(data.success) { showToast('Approved', 'success'); loadUsers(); }
+                else showToast(data.message, 'error');
+             } catch(e) { showToast('Error', 'error'); }
+        }
+
+        async function rejectUser(id) {
+             if(!confirm('Delete this user?')) return;
+             try {
+                const res = await fetch('/api/admin/reject/' + id, {method: 'POST'});
+                const data = await res.json();
+                if(data.success) { showToast('Deleted', 'success'); loadUsers(); }
+                else showToast(data.message, 'error');
+             } catch(e) { showToast('Error', 'error'); }
+        }
+        {% endif %}
 
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
